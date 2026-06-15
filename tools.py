@@ -70,7 +70,42 @@ def search_listings(
     Before writing code, fill in the Tool 1 section of planning.md.
     """
     # Replace this with your implementation
-    return []
+    listings = load_listings()
+    query_words = description.lower().split()
+
+    results = []
+
+    for item in listings:
+        if max_price is not None and item.get("price", 0) > max_price:
+            continue
+
+        if size is not None:
+            item_size = str(item.get("size", "")).lower()
+            if size.lower() not in item_size:
+                continue
+
+        searchable_text = " ".join([
+            str(item.get("title", "")),
+            str(item.get("description", "")),
+            str(item.get("category", "")),
+            " ".join(item.get("style_tags", [])),
+            str(item.get("brand", "")),
+            " ".join(item.get("colors", [])),
+        ]).lower()
+
+        score = sum(1 for word in query_words if word in searchable_text)
+
+        if score > 0:
+            item_copy = item.copy()
+            item_copy["_score"] = score
+            results.append(item_copy)
+
+    results.sort(key=lambda x: x["_score"], reverse=True)
+
+    for item in results:
+        item.pop("_score", None)
+
+    return results
 
 
 # ── Tool 2: suggest_outfit ────────────────────────────────────────────────────
@@ -101,7 +136,39 @@ def suggest_outfit(new_item: dict, wardrobe: dict) -> str:
     Before writing code, fill in the Tool 2 section of planning.md.
     """
     # Replace this with your implementation
-    return ""
+    client = _get_groq_client()
+
+    wardrobe_items = wardrobe.get("items", [])
+
+    if not wardrobe_items:
+        wardrobe_text = (
+            "The user has an empty wardrobe. Give general styling advice based only "
+            "on the new item."
+        )
+    else:
+        wardrobe_text = "\n".join(str(item) for item in wardrobe_items)
+
+    prompt = f"""
+    You are FitFindr, a helpful thrift styling assistant.
+
+    New thrift item:
+    {new_item}
+
+    User wardrobe:
+    {wardrobe_text}
+
+    Suggest 1 complete outfit using the new item. If wardrobe items are available,
+    use specific wardrobe pieces. If the wardrobe is empty, give general styling advice.
+    Keep the answer practical, stylish, and under 5 sentences.
+    """
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+    )
+
+    return response.choices[0].message.content.strip()
 
 
 # ── Tool 3: create_fit_card ───────────────────────────────────────────────────
@@ -134,4 +201,31 @@ def create_fit_card(outfit: str, new_item: dict) -> str:
     Before writing code, fill in the Tool 3 section of planning.md.
     """
     # Replace this with your implementation
-    return ""
+    if not outfit or not outfit.strip():
+        return "Fit card could not be created because the outfit suggestion is empty."
+
+    client = _get_groq_client()
+
+    prompt = f"""
+    Create a short social media caption for this thrift outfit.
+
+    New item:
+    {new_item}
+
+    Outfit suggestion:
+    {outfit}
+
+    Requirements:
+    - 2 to 4 sentences
+    - Casual and authentic
+    - Mention the item name, price, and platform naturally if available
+    - Sound like an outfit post, not a product description
+    """
+
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.9,
+    )
+
+    return response.choices[0].message.content.strip()
