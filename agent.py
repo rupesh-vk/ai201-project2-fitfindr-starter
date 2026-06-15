@@ -17,7 +17,7 @@ Usage (once implemented):
     print(result["fit_card"])
     print(result["error"])   # None on success
 """
-
+import re
 from tools import search_listings, suggest_outfit, create_fit_card
 
 
@@ -94,9 +94,61 @@ def run_agent(query: str, wardrobe: dict) -> dict:
     """
     # TODO: implement the planning loop
     session = _new_session(query, wardrobe)
-    session["error"] = "Planning loop not yet implemented."
-    return session
+    lower_query = query.lower()
 
+    max_price = None
+    price_match = re.search(r"(?:under|below|less than|\$)\s*\$?(\d+(?:\.\d+)?)", lower_query)
+    if price_match:
+        max_price = float(price_match.group(1))
+
+    size = None
+    size_match = re.search(r"\bsize\s+([a-zA-Z0-9/]+)\b", query)
+    if size_match:
+        size = size_match.group(1).upper()
+
+    description = lower_query
+
+    description = re.sub(r"(?:under|below|less than)\s*\$?\d+(?:\.\d+)?", "", description)
+    description = re.sub(r"\$\d+(?:\.\d+)?", "", description)
+    description = re.sub(r"\bsize\s+[a-zA-Z0-9/]+\b", "", description)
+    description = description.replace("looking for", "")
+    description = description.replace("i am looking for", "")
+    description = description.replace("i'm looking for", "")
+    description = description.strip()
+
+    session["parsed"] = {
+        "description": description,
+        "size": size,
+        "max_price": max_price,
+    }
+
+    results = search_listings(description, size=size, max_price=max_price)
+    session["search_results"] = results
+
+    if not results:
+        session["error"] = (
+            "No matching listings were found. Try a broader description, "
+            "different size, or higher budget."
+        )
+        return session
+
+    session["selected_item"] = results[0]
+
+    outfit = suggest_outfit(session["selected_item"], wardrobe)
+    session["outfit_suggestion"] = outfit
+
+    if not outfit or not outfit.strip():
+        session["error"] = "No outfit suggestion could be created for this item."
+        return session
+
+    fit_card = create_fit_card(outfit, session["selected_item"])
+    session["fit_card"] = fit_card
+
+    if not fit_card or "could not be created" in fit_card.lower():
+        session["error"] = fit_card
+        return session
+
+    return session
 
 # ── CLI test ──────────────────────────────────────────────────────────────────
 
